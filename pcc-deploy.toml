@@ -1,0 +1,6 @@
+agent_name = "mitesh-coach"
+image = "komalsiddharth/mitesh-coach:0.1"
+secret_set = "mitesh-coach-secrets"
+
+[scaling]
+min_instances = 0
