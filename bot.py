@@ -16,7 +16,10 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from pipecatcloud.agent import DailySessionArguments
 
-logger.remove(0)
+try:
+    logger.remove(0)
+except ValueError:
+    pass
 logger.add(sys.stderr, level="DEBUG")
 
 # Load Silero VAD model at module level (loaded once per container)
