@@ -22,7 +22,7 @@ except ValueError:
     pass
 logger.add(sys.stderr, level="DEBUG")
 
-async def main(args: DailySessionArguments):
+async def bot(args: DailySessionArguments):
     """Main bot entry point — called by Pipecat Cloud for each session."""
 
     logger.info(f"🎯 Mitesh AI Coach starting...")
@@ -127,6 +127,6 @@ When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khat
     logger.info("🏁 Bot session ended")
 
 if __name__ == "__main__":
-    from pipecatcloud.runner import run_agent
-    run_agent(main)
+    from pipecat.runner.run import main
+    main()
 
