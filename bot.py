@@ -10,9 +10,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMService, OpenAISTTService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 from pipecatcloud.agent import DailySessionArguments
 
@@ -22,17 +23,16 @@ except ValueError:
     pass
 logger.add(sys.stderr, level="DEBUG")
 
-# Load Silero VAD model at module level (loaded once per container)
-logger.info("Loading Silero VAD model...")
-vad_analyzer = SileroVADAnalyzer()
-logger.info("✅ Silero VAD model loaded")
-
-
 async def main(args: DailySessionArguments):
     """Main bot entry point — called by Pipecat Cloud for each session."""
 
     logger.info(f"🎯 Mitesh AI Coach starting...")
     logger.info(f"🏠 Room: {args.room_url}")
+
+    # Load Silero VAD model (Lazy load inside session to prevent startup timeout)
+    logger.info("Loading Silero VAD model...")
+    vad_analyzer = SileroVADAnalyzer()
+    logger.info("✅ Silero VAD model loaded")
 
     # --- Transport ---
     transport = DailyTransport(
@@ -92,6 +92,25 @@ When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khat
         tts,
         transport.output(),
         context_aggregator.assistant(),
+        context_aggregator.assistant(),
+    ])
+    # Note: Double assistant aggregator is unusual but might be intended for context flow. Check.
+    # Wait, line 95 context_aggregator.assistant() was there. Then I might have misread/edited?
+    # Let me check my previous edit. It had 2 assistants? No, step 1033 shows one.
+    # Ah, step 1033 lines 94-95 show:
+    # 94: transport.output(),
+    # 95: context_aggregator.assistant(),
+    # So only one. I will fix it here.
+    
+    # --- Pipeline ---
+    pipeline = Pipeline([
+        transport.input(),
+        stt,
+        context_aggregator.user(),
+        llm,
+        tts,
+        transport.output(),
+        context_aggregator.assistant(),
     ])
 
     task = PipelineTask(
@@ -122,7 +141,12 @@ When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khat
             await task.queue_frame(EndFrame())
 
     # --- Run ---
-    runner = PipelineRunner(handle_sigint=False, force_gc=True)
+    runner = PipelineRunner(handle_sigint=False)
     logger.info("🏃 Starting pipeline...")
     await runner.run(task)
     logger.info("🏁 Bot session ended")
+
+if __name__ == "__main__":
+    from pipecatcloud.runner import run_agent
+    run_agent(main)
+
