@@ -1,49 +1,34 @@
 import os
-import sys
 
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.runner.types import RunnerArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
-from pipecatcloud.agent import DailySessionArguments
 
-try:
-    logger.remove(0)
-except ValueError:
-    pass
-logger.add(sys.stderr, level="DEBUG")
-
-async def bot(args: DailySessionArguments):
+async def bot(runner_args: RunnerArguments):
     """Main bot entry point — called by Pipecat Cloud for each session."""
 
-    logger.info(f"🎯 Mitesh AI Coach starting...")
-    logger.info(f"🏠 Room: {args.room_url}")
+    logger.info(f"Mitesh AI Coach starting...")
+    logger.info(f"Room: {runner_args.room_url}")
 
-    # Load Silero VAD model (Lazy load inside session to prevent startup timeout)
-    logger.info("Loading Silero VAD model...")
-    vad_analyzer = SileroVADAnalyzer()
-    logger.info("✅ Silero VAD model loaded")
-
-    # --- Transport ---
     transport = DailyTransport(
-        args.room_url,
-        args.token,
+        runner_args.room_url,
+        runner_args.token,
         "Mitesh AI Coach",
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
-            vad_analyzer=vad_analyzer,
-            vad_audio_passthrough=True,
+            vad_analyzer=SileroVADAnalyzer(),
+            transcription_enabled=True,
         ),
     )
 
@@ -63,7 +48,10 @@ async def bot(args: DailySessionArguments):
     )
 
     # --- Conversation Context ---
-    system_prompt = """You are Mitesh Khatri, a world-class life coach and motivational speaker.
+    messages = [
+        {
+            "role": "system",
+            "content": """You are Mitesh Khatri, a world-class life coach and motivational speaker.
 
 Your personality:
 - Warm, empathetic, and encouraging
@@ -73,10 +61,8 @@ Your personality:
 - You ask follow-up questions to understand the person better
 
 IMPORTANT: Keep ALL responses under 3 sentences. This is a voice conversation, not text chat.
-When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khatri."""
-
-    messages = [
-        {"role": "system", "content": system_prompt},
+When you receive a greeting or hello, introduce yourself warmly as Mitesh Khatri.""",
+        },
     ]
 
     context = OpenAILLMContext(messages)
@@ -102,31 +88,26 @@ When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khat
     )
 
     # --- Event Handlers ---
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        logger.info(f"👋 User joined! Triggering greeting...")
-        # Inject a greeting message to make the bot speak first
-        messages.append({"role": "user", "content": "Hello, please introduce yourself"})
-        await task.queue_frames([LLMMessagesFrame(messages)])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, participant):
+        logger.info(f"User joined!")
+        await transport.capture_participant_transcription(participant["id"])
+        # Trigger greeting
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        logger.info(f"👋 User left (reason: {reason}). Ending bot...")
-        await task.queue_frame(EndFrame())
-
-    @transport.event_handler("on_call_state_updated")
-    async def on_call_state_updated(transport, state):
-        logger.info(f"📞 Call state: {state}")
-        if state == "left":
-            await task.queue_frame(EndFrame())
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"User left. Ending bot...")
+        await task.cancel()
 
     # --- Run ---
-    runner = PipelineRunner(handle_sigint=False)
-    logger.info("🏃 Starting pipeline...")
+    runner = PipelineRunner(handle_sigint=False, force_gc=True)
+    logger.info("Starting pipeline...")
     await runner.run(task)
-    logger.info("🏁 Bot session ended")
+    logger.info("Bot session ended")
+
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
-    main()
 
+    main()
