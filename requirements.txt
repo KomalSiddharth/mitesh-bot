@@ -1,4 +1,4 @@
-pipecat-ai[daily,openai,cartesia,silero]
+pipecat-ai[daily,openai,cartesia,silero,webrtc]
 pipecatcloud
 python-dotenv
 loguru
