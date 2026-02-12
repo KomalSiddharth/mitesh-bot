@@ -3,4 +3,4 @@ image = "komalsiddharth/mitesh-coach:0.1"
 secret_set = "mitesh-coach-secrets"
 
 [scaling]
-min_instances = 0
+min_agents = 0
