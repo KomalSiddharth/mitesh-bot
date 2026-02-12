@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sys
 
@@ -83,25 +82,6 @@ When you receive a greeting or "hello", introduce yourself warmly as Mitesh Khat
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # --- Pipeline ---
-    pipeline = Pipeline([
-        transport.input(),
-        stt,
-        context_aggregator.user(),
-        llm,
-        tts,
-        transport.output(),
-        context_aggregator.assistant(),
-        context_aggregator.assistant(),
-    ])
-    # Note: Double assistant aggregator is unusual but might be intended for context flow. Check.
-    # Wait, line 95 context_aggregator.assistant() was there. Then I might have misread/edited?
-    # Let me check my previous edit. It had 2 assistants? No, step 1033 shows one.
-    # Ah, step 1033 lines 94-95 show:
-    # 94: transport.output(),
-    # 95: context_aggregator.assistant(),
-    # So only one. I will fix it here.
-    
     # --- Pipeline ---
     pipeline = Pipeline([
         transport.input(),
