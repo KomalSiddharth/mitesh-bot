@@ -1,5 +1,5 @@
 agent_name = "mitesh-coach"
-image = "komalsiddharth/mitesh-coach:0.1"
+image = "komalsiddharth/mitesh-coach:0.1.2"
 secret_set = "mitesh-coach-secrets"
 
 [scaling]
