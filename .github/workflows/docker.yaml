@@ -28,7 +28,7 @@ jobs:
           context: .
           push: true
           tags: komalsiddharth/mitesh-coach:0.1
-          platforms: linux/amd64
+          platforms: linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
