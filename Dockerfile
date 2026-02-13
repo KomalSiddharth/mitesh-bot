@@ -1,4 +1,4 @@
-FROM dailyco/pipecat-base:latest
+FROM dailyco/pipecat-base:latest-py3.12
 
 COPY ./requirements.txt requirements.txt
 
