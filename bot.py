@@ -1,5 +1,5 @@
 import os
-# Force deployment: v0.1.1
+# Force deployment: v0.1.2
 
 from loguru import logger
 
@@ -110,5 +110,5 @@ When you receive a greeting or hello, introduce yourself warmly as Mitesh Khatri
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
-
+    logger.info("Mitesh Bot v0.1.2 starting...")
     main()
