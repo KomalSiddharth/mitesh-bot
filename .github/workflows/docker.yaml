@@ -36,7 +36,8 @@ jobs:
         run: pip install pipecatcloud
 
       - name: Deploy to Pipecat Cloud
+        env:
+          PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
           pcc deploy \
-            --api-key ${{ secrets.PCC_API_KEY }} \
             --credentials dockerhub
