@@ -1,4 +1,4 @@
-FROM dailyco/pipecat-base:latest-py3.12
+FROM --platform=linux/arm64 dailyco/pipecat-base:latest-py3.12
 
 COPY ./requirements.txt requirements.txt
 
