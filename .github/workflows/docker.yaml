@@ -33,7 +33,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Install Pipecat CLI
-        run: pip install pipecat-cloud-cli
+        run: pip install pipecatcloud
 
       - name: Deploy to Pipecat Cloud
         run: |
