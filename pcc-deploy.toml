@@ -1,6 +1,6 @@
-agent_name = "mitesh-coach"
-image = "komalsiddharth/mitesh-coach:0.1.2"
-secret_set = "mitesh-coach-secrets"
+agent_name = "mitesh-bot-v3"
+image = "komalsiddharth/mitesh-coach:latest"
+secret_set = "mitesh-final-secrets"
 
 [scaling]
 min_agents = 0
