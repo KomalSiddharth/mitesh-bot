@@ -38,7 +38,7 @@ jobs:
       - name: Deploy to Pipecat Cloud
         shell: bash
         env:
-          PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
+          PIPECAT_CLOUD_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
           echo "Checking Pipecat Cloud Organization..."
           pcc agent list
