@@ -38,9 +38,11 @@ jobs:
       - name: Deploy to Pipecat Cloud
         shell: bash
         env:
+          PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
           PIPECAT_CLOUD_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
           echo "Checking Pipecat Cloud Organization..."
-          pcc agent list
+          pcc agent list || { echo "Authentication failed!"; exit 1; }
+          
           echo "Starting deployment to Pipecat Cloud..."
-          pcc deploy --credentials mitesh-final-secrets
+          pcc deploy --credentials mitesh-final-secrets || { echo "Deployment failed!"; exit 1; }
