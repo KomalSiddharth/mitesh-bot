@@ -40,7 +40,7 @@ jobs:
         env:
           PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
-          echo "Verifying Pipecat CLI authentication..."
-          pcc whoami
-          echo "Starting deployment..."
+          echo "Checking Pipecat Cloud Organization..."
+          pcc agent list
+          echo "Starting deployment to Pipecat Cloud..."
           pcc deploy --credentials mitesh-final-secrets
