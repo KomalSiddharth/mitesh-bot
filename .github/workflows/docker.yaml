@@ -35,9 +35,14 @@ jobs:
       - name: Install Pipecat CLI
         run: pip install pipecatcloud
 
+      - name: Verify Pipecat CLI
+        env:
+          PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
+        run: pcc agent list
+
       - name: Deploy to Pipecat Cloud
         env:
           PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
           pcc deploy \
-            --credentials dockerhub
+            --credentials mitesh-final-secrets
