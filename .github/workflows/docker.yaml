@@ -35,14 +35,12 @@ jobs:
       - name: Install Pipecat CLI
         run: pip install pipecatcloud
 
-      - name: Verify Pipecat CLI
-        env:
-          PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
-        run: pcc agent list
-
       - name: Deploy to Pipecat Cloud
+        shell: bash
         env:
           PCC_API_KEY: ${{ secrets.PCC_API_KEY }}
         run: |
-          pcc deploy \
-            --credentials mitesh-final-secrets
+          echo "Verifying Pipecat CLI authentication..."
+          pcc whoami
+          echo "Starting deployment..."
+          pcc deploy --credentials mitesh-final-secrets
