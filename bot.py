@@ -1,114 +1,106 @@
-import os
-# Force deployment: v0.1.2
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot"""
 
+import os
 from loguru import logger
+from dotenv import load_dotenv
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMMessagesFrame, EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask, PipelineParams
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
+
+load_dotenv(override=True)
+
+logger.info("Mitesh Bot v2.0 starting...")
+
+# Transport params for Daily and WebRTC
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
 
-async def bot(runner_args: RunnerArguments):
-    """Main bot entry point — called by Pipecat Cloud for each session."""
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info("Starting Mitesh AI Coach pipeline...")
 
-    logger.info(f"Mitesh AI Coach starting...")
-    logger.info(f"Room: {runner_args.room_url}")
-
-    transport = DailyTransport(
-        runner_args.room_url,
-        runner_args.token,
-        "Mitesh AI Coach",
-        DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            transcription_enabled=True,
-        ),
-    )
-
-    # --- AI Services ---
-    stt = OpenAISTTService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
-
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini",
-    )
-
+    stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id=os.getenv("CARTESIA_VOICE_ID"),
+        model_id="sonic-multilingual",
     )
 
-    # --- Conversation Context ---
     messages = [
         {
             "role": "system",
-            "content": """You are Mitesh Khatri, a world-class life coach and motivational speaker.
-
-Your personality:
-- Warm, empathetic, and encouraging
-- You speak in a mix of Hindi and English (Hinglish) naturally
-- You give practical, actionable advice
-- You keep responses SHORT (2-3 sentences max for voice conversation)
-- You ask follow-up questions to understand the person better
-
-IMPORTANT: Keep ALL responses under 3 sentences. This is a voice conversation, not text chat.
-When you receive a greeting or hello, introduce yourself warmly as Mitesh Khatri.""",
-        },
+            "content": (
+                "You are Mitesh Khatri, a renowned Indian life coach and motivational speaker. "
+                "You speak in Hinglish (mix of Hindi and English). "
+                "Keep your responses short - 2 to 3 sentences max. "
+                "Be warm, encouraging, and practical in your advice. "
+                "Start with a friendly greeting when someone joins."
+            ),
+        }
     ]
 
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # --- Pipeline ---
-    pipeline = Pipeline([
-        transport.input(),
-        stt,
-        context_aggregator.user(),
-        llm,
-        tts,
-        transport.output(),
-        context_aggregator.assistant(),
-    ])
-
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            allow_interruptions=True,
-            enable_metrics=True,
-        ),
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ]
     )
 
-    # --- Event Handlers ---
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, participant):
-        logger.info(f"User joined!")
-        await transport.capture_participant_transcription(participant["id"])
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        logger.info(f"Participant joined: {participant.get('id', 'unknown')}")
         # Trigger greeting
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        messages.append({"role": "user", "content": "Hi Mitesh! I just joined. Please greet me warmly."})
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
-        logger.info(f"User left. Ending bot...")
-        await task.cancel()
+    @transport.event_handler("on_participant_left")
+    async def on_participant_left(transport, participant, reason):
+        logger.info(f"Participant left: {participant.get('id', 'unknown')}")
+        await task.queue_frame(EndFrame())
 
-    # --- Run ---
-    runner = PipelineRunner(handle_sigint=False, force_gc=True)
-    logger.info("Starting pipeline...")
+    runner = PipelineRunner()
     await runner.run(task)
-    logger.info("Bot session ended")
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
-    logger.info("Mitesh Bot v0.1.2 starting...")
+
     main()

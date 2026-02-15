@@ -1,4 +1,4 @@
-agent_name = "mitesh-bot-v3"
+agent_name = "mitesh-coach"
 image = "komalsiddharth/mitesh-coach:latest"
 secret_set = "mitesh-final-secrets"
 
