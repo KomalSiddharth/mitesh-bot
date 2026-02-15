@@ -14,6 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 
-ENV PIPECAT_RUNNER_PORT=8080
+ENV PORT=8080
 
 CMD ["python", "bot.py"]
