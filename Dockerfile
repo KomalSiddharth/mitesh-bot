@@ -1,17 +1,7 @@
-FROM python:3.11-slim
+FROM dailyco/pipecat-base:latest
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    libportaudio2 \
-    libasound2-dev \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+COPY ./requirements.txt requirements.txt
 
-WORKDIR /app
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY bot.py .
-
-CMD ["python", "bot.py", "--host", "0.0.0.0", "--port", "8080", "--transport", "daily"]
+COPY ./bot.py bot.py

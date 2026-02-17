@@ -5,7 +5,7 @@ from loguru import logger
 from dotenv import load_dotenv
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame, EndFrame
+from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -20,9 +20,8 @@ from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v2.1 starting...")
+logger.info("Mitesh Bot v3.0 starting...")
 
-# Transport params for Daily and WebRTC
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -83,13 +82,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info("Client connected - sending greeting")
         messages.append({"role": "system", "content": "Say hello and briefly introduce yourself."})
         await task.queue_frames([LLMMessagesFrame(messages)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
