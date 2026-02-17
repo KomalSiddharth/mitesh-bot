@@ -20,7 +20,7 @@ from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v2.0 starting...")
+logger.info("Mitesh Bot v2.1 starting...")
 
 # Transport params for Daily and WebRTC
 transport_params = {
@@ -76,21 +76,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(allow_interruptions=True),
+    )
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        logger.info(f"Participant joined: {participant.get('id', 'unknown')}")
-        # Trigger greeting
-        messages.append({"role": "user", "content": "Hi Mitesh! I just joined. Please greet me warmly."})
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        messages.append({"role": "system", "content": "Say hello and briefly introduce yourself."})
         await task.queue_frames([LLMMessagesFrame(messages)])
 
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        logger.info(f"Participant left: {participant.get('id', 'unknown')}")
-        await task.queue_frame(EndFrame())
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
 
 
@@ -104,4 +106,3 @@ if __name__ == "__main__":
     from pipecat.runner.run import main
 
     main()
-    
