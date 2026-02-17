@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 
-CMD ["python", "bot.py", "--port", "8080", "--host", "0.0.0.0"] 
+CMD ["python", "bot.py", "--port", "8080", "--host", "0.0.0.0"]
