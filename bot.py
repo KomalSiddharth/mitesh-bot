@@ -1,6 +1,7 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v5)"""
 
 import os
+import json
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -17,15 +18,13 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.frames.frames import TranscriptionFrame
 
 import openai as openai_module
 from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v4.0-RAG starting...")
+logger.info("Mitesh Bot v5.0-RAG starting...")
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -41,26 +40,23 @@ else:
 # OpenAI client for embeddings
 oai_client = openai_module.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Default profile ID (will be overridden by dynamic data)
 DEFAULT_PROFILE_ID = os.getenv("DEFAULT_PROFILE_ID", None)
 
 
-async def fetch_knowledge(query_text: str, profile_id: str = None) -> str:
-    """Fetch relevant knowledge from Supabase using vector similarity search"""
+def fetch_knowledge_sync(query_text: str, profile_id: str = None) -> str:
+    """Fetch relevant knowledge from Supabase (synchronous for function calling)"""
     if not supabase or not query_text.strip():
-        return ""
+        return "No knowledge available."
 
     try:
-        # Step 1: Generate embedding for the query
+        # Generate embedding
         embedding_response = oai_client.embeddings.create(
             model="text-embedding-3-small",
             input=query_text,
         )
         query_embedding = embedding_response.data[0].embedding
 
-        knowledge_context = ""
-
-        # Step 2a: Try match_knowledge (chat function - with profile filter)
+        # Try match_knowledge with profile filter first
         if profile_id:
             try:
                 result = supabase.rpc("match_knowledge", {
@@ -70,41 +66,40 @@ async def fetch_knowledge(query_text: str, profile_id: str = None) -> str:
                     "p_profile_id": profile_id,
                 }).execute()
 
-                if result.data:
+                if result.data and len(result.data) > 0:
                     chunks = [
                         f"[{c.get('source_title', 'Source')}]: {c.get('content', '')}"
                         for c in result.data
                     ]
-                    knowledge_context = "\n\n".join(chunks)
                     logger.info(f"📚 RAG: Found {len(result.data)} chunks via match_knowledge")
+                    return "\n\n".join(chunks)
             except Exception as e:
                 logger.warning(f"match_knowledge failed: {e}")
 
-        # Step 2b: Fallback to match_knowledge_chunks if no results
-        if not knowledge_context:
-            try:
-                result = supabase.rpc("match_knowledge_chunks", {
-                    "query_embedding": query_embedding,
-                    "match_threshold": 0.5,
-                    "match_count": 3,
-                }).execute()
+        # Fallback to match_knowledge_chunks
+        try:
+            result = supabase.rpc("match_knowledge_chunks", {
+                "query_embedding": query_embedding,
+                "match_threshold": 0.5,
+                "match_count": 3,
+            }).execute()
 
-                if result.data:
-                    chunks = [c.get("content", "") for c in result.data]
-                    knowledge_context = "\n\n".join(chunks)
-                    logger.info(f"📚 RAG: Found {len(result.data)} chunks via match_knowledge_chunks")
-            except Exception as e:
-                logger.warning(f"match_knowledge_chunks failed: {e}")
+            if result.data and len(result.data) > 0:
+                chunks = [c.get("content", "") for c in result.data]
+                logger.info(f"📚 RAG: Found {len(result.data)} chunks via match_knowledge_chunks")
+                return "\n\n".join(chunks)
+        except Exception as e:
+            logger.warning(f"match_knowledge_chunks failed: {e}")
 
-        return knowledge_context
+        return "No relevant knowledge found for this query."
 
     except Exception as e:
         logger.error(f"❌ RAG Error: {e}")
-        return ""
+        return "Knowledge search failed."
 
 
-async def get_profile_info(profile_id: str) -> dict:
-    """Fetch mind_profile info from Supabase"""
+def get_profile_info_sync(profile_id: str) -> dict:
+    """Fetch mind_profile info from Supabase (synchronous)"""
     if not supabase or not profile_id:
         return {}
 
@@ -122,40 +117,45 @@ async def get_profile_info(profile_id: str) -> dict:
     return {}
 
 
-class RAGProcessor(FrameProcessor):
-    """Intercepts user transcription, fetches knowledge, and enriches the LLM context"""
+# Define the search tool for OpenAI function calling
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge_base",
+            "description": "Search the knowledge base for relevant information about coaching, Law of Attraction, NLP, meditation, motivation, and other topics. Always use this when the user asks a question about any coaching topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant knowledge"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
 
-    def __init__(self, messages: list, profile_id: str = None):
-        super().__init__()
-        self.messages = messages
-        self.profile_id = profile_id
-        self.knowledge_injected = False
+# Store profile_id globally for use in function handler
+_current_profile_id = None
 
-    async def process_frame(self, frame, direction):
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
-            user_text = frame.text.strip()
-            logger.info(f"🎤 User said: {user_text}")
 
-            # Fetch knowledge for this question
-            knowledge = await fetch_knowledge(user_text, self.profile_id)
+async def handle_function_call(function_name: str, tool_call_id: str, arguments: str, llm: OpenAILLMService, context, task):
+    """Handle function calls from the LLM"""
+    global _current_profile_id
 
-            if knowledge:
-                # Update system prompt with fresh knowledge context
-                knowledge_prompt = (
-                    f"\n\n--- KNOWLEDGE BASE CONTEXT (USE THIS TO ANSWER - 80% WEIGHT) ---\n"
-                    f"{knowledge}\n"
-                    f"--- END KNOWLEDGE ---\n"
-                    f"STRICT: Answer based on the above knowledge. "
-                    f"If not found, say you don't have that info but offer related help."
-                )
+    if function_name == "search_knowledge_base":
+        args = json.loads(arguments)
+        query = args.get("query", "")
+        logger.info(f"🔍 Function call: search_knowledge_base('{query}')")
 
-                # Update the system message with knowledge
-                if len(self.messages) > 0 and self.messages[0]["role"] == "system":
-                    base_prompt = self.messages[0]["content"].split("--- KNOWLEDGE BASE CONTEXT")[0]
-                    self.messages[0]["content"] = base_prompt + knowledge_prompt
-                    logger.info(f"📚 Knowledge injected ({len(knowledge)} chars)")
+        # Fetch knowledge
+        knowledge = fetch_knowledge_sync(query, _current_profile_id)
+        logger.info(f"📚 Knowledge result: {len(knowledge)} chars")
 
-        await self.push_frame(frame, direction)
+        return knowledge
 
 
 # Transport params
@@ -174,20 +174,22 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting Mitesh AI Coach pipeline with RAG...")
+    global _current_profile_id
 
-    # Extract profile_id from runner_args body (passed from frontend)
+    logger.info("Starting Mitesh AI Coach pipeline with RAG v5...")
+
+    # Extract profile_id from runner_args body
     profile_id = DEFAULT_PROFILE_ID
     if hasattr(runner_args, 'body') and runner_args.body:
         body = runner_args.body if isinstance(runner_args.body, dict) else {}
         profile_id = body.get("profile_id", body.get("profileId", DEFAULT_PROFILE_ID))
 
+    _current_profile_id = profile_id
     logger.info(f"🆔 Profile ID: {profile_id}")
 
     # Fetch profile info
-    profile = await get_profile_info(profile_id) if profile_id else {}
+    profile = get_profile_info_sync(profile_id) if profile_id else {}
 
-    # Build system prompt
     profile_name = profile.get("name", "Mitesh Khatri")
     profile_headline = profile.get("headline", "Law of Attraction Coach")
     profile_description = profile.get("description", "")
@@ -215,34 +217,38 @@ VOICE CONVERSATION RULES:
 - Use casual Hinglish (mix of Hindi and English).
 - Be warm, encouraging, and practical.
 - Use phrases like "Hey Champion", "Bilkul", "Dekho".
-- If knowledge base has the answer, explain it simply.
-- If not, say "I don't have that info right now, but let me help with what I can!" positively.
+- ALWAYS use the search_knowledge_base function to find relevant knowledge BEFORE answering any coaching question.
+- If knowledge base has the answer, explain it simply in your own words.
+- If not found, say you don't have that info but offer related help.
 - NEVER read out URLs or links in voice.
-- NEVER use markdown formatting (no **, no ##, no bullets).
+- NEVER use markdown formatting.
 - Speak like you're talking to a friend, not writing an essay.
 """
 
     stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-mini",
+    )
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id=os.getenv("CARTESIA_VOICE_ID"),
         model_id="sonic-multilingual",
     )
 
+    # Register the function handler
+    llm.register_function("search_knowledge_base", handle_function_call)
+
     messages = [{"role": "system", "content": system_prompt}]
 
-    context = OpenAILLMContext(messages)
+    context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # RAG processor - intercepts transcriptions and fetches knowledge
-    rag = RAGProcessor(messages, profile_id)
-
+    # Clean pipeline - NO custom processors
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            rag,  # RAG processor between STT and context aggregator
             context_aggregator.user(),
             llm,
             tts,
