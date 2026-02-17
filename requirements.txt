@@ -1,3 +1,5 @@
 pipecat-ai[daily,openai,cartesia,silero]
 python-dotenv
 loguru
+supabase
+openai
