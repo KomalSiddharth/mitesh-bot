@@ -189,7 +189,7 @@ RULES:
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe",
+        model="whisper-1",
         language="hi",
     )
     logger.info("STT: gpt-4o-transcribe (Hindi)")
