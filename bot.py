@@ -1,4 +1,4 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v5)"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v5.1)"""
 
 import os
 import json
@@ -24,9 +24,9 @@ from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v5.0-RAG starting...")
+logger.info("Mitesh Bot v5.1-RAG starting...")
 
-# Initialize Supabase client
+# Initialize Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -42,21 +42,22 @@ oai_client = openai_module.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 DEFAULT_PROFILE_ID = os.getenv("DEFAULT_PROFILE_ID", None)
 
+# Store profile_id globally for use in function handler
+_current_profile_id = None
+
 
 def fetch_knowledge_sync(query_text: str, profile_id: str = None) -> str:
-    """Fetch relevant knowledge from Supabase (synchronous for function calling)"""
+    """Fetch relevant knowledge from Supabase"""
     if not supabase or not query_text.strip():
         return "No knowledge available."
 
     try:
-        # Generate embedding
         embedding_response = oai_client.embeddings.create(
             model="text-embedding-3-small",
             input=query_text,
         )
         query_embedding = embedding_response.data[0].embedding
 
-        # Try match_knowledge with profile filter first
         if profile_id:
             try:
                 result = supabase.rpc("match_knowledge", {
@@ -76,7 +77,6 @@ def fetch_knowledge_sync(query_text: str, profile_id: str = None) -> str:
             except Exception as e:
                 logger.warning(f"match_knowledge failed: {e}")
 
-        # Fallback to match_knowledge_chunks
         try:
             result = supabase.rpc("match_knowledge_chunks", {
                 "query_embedding": query_embedding,
@@ -99,7 +99,7 @@ def fetch_knowledge_sync(query_text: str, profile_id: str = None) -> str:
 
 
 def get_profile_info_sync(profile_id: str) -> dict:
-    """Fetch mind_profile info from Supabase (synchronous)"""
+    """Fetch mind_profile info from Supabase"""
     if not supabase or not profile_id:
         return {}
 
@@ -123,7 +123,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "search_knowledge_base",
-            "description": "Search the knowledge base for relevant information about coaching, Law of Attraction, NLP, meditation, motivation, and other topics. Always use this when the user asks a question about any coaching topic.",
+            "description": "Search the knowledge base for relevant information about coaching, Law of Attraction, NLP, meditation, motivation, and other topics. Always use this when the user asks a question.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -138,24 +138,20 @@ tools = [
     }
 ]
 
-# Store profile_id globally for use in function handler
-_current_profile_id = None
 
-
-async def handle_function_call(function_name: str, tool_call_id: str, arguments: str, llm: OpenAILLMService, context, task):
-    """Handle function calls from the LLM"""
+async def on_search_knowledge_base(params):
+    """Handle the search_knowledge_base function call (new FunctionCallParams style)"""
     global _current_profile_id
 
-    if function_name == "search_knowledge_base":
-        args = json.loads(arguments)
-        query = args.get("query", "")
-        logger.info(f"🔍 Function call: search_knowledge_base('{query}')")
+    arguments = params.arguments
+    query = arguments.get("query", "")
+    logger.info(f"🔍 Function call: search_knowledge_base('{query}')")
 
-        # Fetch knowledge
-        knowledge = fetch_knowledge_sync(query, _current_profile_id)
-        logger.info(f"📚 Knowledge result: {len(knowledge)} chars")
+    knowledge = fetch_knowledge_sync(query, _current_profile_id)
+    logger.info(f"📚 Knowledge result: {len(knowledge)} chars")
 
-        return knowledge
+    # Return the result - Pipecat will feed it back to the LLM
+    return knowledge
 
 
 # Transport params
@@ -176,9 +172,9 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     global _current_profile_id
 
-    logger.info("Starting Mitesh AI Coach pipeline with RAG v5...")
+    logger.info("Starting Mitesh AI Coach pipeline with RAG v5.1...")
 
-    # Extract profile_id from runner_args body
+    # Extract profile_id
     profile_id = DEFAULT_PROFILE_ID
     if hasattr(runner_args, 'body') and runner_args.body:
         body = runner_args.body if isinstance(runner_args.body, dict) else {}
@@ -187,7 +183,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     _current_profile_id = profile_id
     logger.info(f"🆔 Profile ID: {profile_id}")
 
-    # Fetch profile info
+    # Fetch profile
     profile = get_profile_info_sync(profile_id) if profile_id else {}
 
     profile_name = profile.get("name", "Mitesh Khatri")
@@ -225,19 +221,26 @@ VOICE CONVERSATION RULES:
 - Speak like you're talking to a friend, not writing an essay.
 """
 
-    stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
+    # STT with Hindi/Hinglish support
+    stt = OpenAISTTService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-transcribe",
+        language="hi",  # Hindi language for better Hinglish recognition
+    )
+
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="gpt-4o-mini",
     )
+
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id=os.getenv("CARTESIA_VOICE_ID"),
         model_id="sonic-multilingual",
     )
 
-    # Register the function handler
-    llm.register_function("search_knowledge_base", handle_function_call)
+    # Register function handler (new style)
+    llm.register_function("search_knowledge_base", on_search_knowledge_base)
 
     messages = [{"role": "system", "content": system_prompt}]
 
