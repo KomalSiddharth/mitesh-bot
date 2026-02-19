@@ -55,11 +55,11 @@ def fetch_knowledge_sync(query_text, profile_id=None):
         if profile_id:
             try:
                 result = supabase.rpc("match_knowledge", {
-                    "query_embedding": query_embedding,
-                    "match_threshold": 0.35,
-                    "match_count": 5,
-                    "p_profile_id": profile_id,
-                }).execute()
+                "query_embedding": query_embedding,
+                "match_threshold": 0.35,
+                "match_count": 5,
+                "p_profile_id": "1cb7dee0-815f-4278-b93e-062bdf486389",
+            }).execute()
                 if result.data and len(result.data) > 0:
                     chunks = [f"[{c.get('source_title', 'Source')}]: {c.get('content', '')}" for c in result.data]
                     logger.info(f"RAG: Found {len(result.data)} chunks via match_knowledge")
@@ -67,18 +67,7 @@ def fetch_knowledge_sync(query_text, profile_id=None):
             except Exception as e:
                 logger.warning(f"match_knowledge failed: {e}")
 
-        try:
-            result = supabase.rpc("match_knowledge_chunks", {
-                "query_embedding": query_embedding,
-                "match_threshold": 0.5,
-                "match_count": 3,
-            }).execute()
-            if result.data and len(result.data) > 0:
-                chunks = [c.get("content", "") for c in result.data]
-                logger.info(f"RAG: Found {len(result.data)} chunks via match_knowledge_chunks")
-                return "\n\n".join(chunks)
-        except Exception as e:
-            logger.warning(f"match_knowledge_chunks failed: {e}")
+        
 
         return "No relevant knowledge found."
     except Exception as e:
