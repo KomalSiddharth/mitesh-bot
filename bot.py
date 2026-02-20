@@ -1,4 +1,4 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v6.3 FINAL)"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v6.4 Language Fix)"""
 
 import os
 import json
@@ -23,7 +23,7 @@ from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v6.3-RAG-FINAL starting...")
+logger.info("Mitesh Bot v6.4-LANGUAGE-FIX starting...")
 
 # ──────────────────────────── Config ────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -152,7 +152,7 @@ transport_params = {
 
 # ──────────────────────────── Bot ────────────────────────────
 async def run_bot(transport: BaseTransport, _runner_args):
-    logger.info("Starting pipeline v6.3 FINAL...")
+    logger.info("Starting pipeline v6.4 LANGUAGE FIX...")
 
     # Load profile
     profile = get_profile_info_sync(HARDCODED_PROFILE_ID)
@@ -167,23 +167,29 @@ async def run_bot(transport: BaseTransport, _runner_args):
 Biography: {profile_description}
 Speaking Style: {profile_style}
 
-RULES:
+LANGUAGE RULES (VERY IMPORTANT):
+- Your DEFAULT language is ENGLISH. Always start and greet in English.
+- MATCH the user's language: If user speaks in English, reply in English. If user speaks in Hindi, reply in Hindi. If user speaks in Hinglish (mix), reply in Hinglish.
+- NEVER switch to Hindi/Hinglish unless the user speaks Hindi/Hinglish first.
+- When in English mode, keep it natural and conversational English.
+- When in Hindi/Hinglish mode, use casual Hinglish naturally.
+
+RESPONSE RULES:
 - LIVE VOICE CALL. Keep responses to 2-3 sentences max.
 - Speak naturally like a real person on a phone call.
-- Use casual Hinglish (Hindi + English mix).
-- Be warm and encouraging. Use "Hey Champion", "Bilkul", "Dekho", "Acha".
+- Be warm and encouraging. Use phrases like "Hey Champion", "Absolutely", "Great question".
 - You MUST call search_knowledge_base function BEFORE answering ANY coaching question.
 - After getting knowledge, explain it simply in your own words.
 - If knowledge base returns results, USE that information in your answer.
 - NEVER read URLs, links, or use markdown formatting.
-- Talk like chatting with a friend."""
+- Talk like chatting with a friend.
+- Keep your tone warm, motivational, and coach-like."""
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="whisper-1",
-        language="hi",
     )
-    logger.info("STT: whisper-1 (Hindi)")
+    logger.info("STT: whisper-1 (auto-detect language)")
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -229,7 +235,7 @@ RULES:
         logger.info("Client connected")
         messages.append({
             "role": "system",
-            "content": "Say hello warmly. Introduce yourself as Mitesh Khatri in 2 sentences max."
+            "content": "Greet the user warmly IN ENGLISH. Introduce yourself as Mitesh Khatri in 2 sentences max. Do NOT use Hindi."
         })
         await task.queue_frames([LLMMessagesFrame(messages)])
 
@@ -238,7 +244,7 @@ RULES:
         logger.info("Client disconnected")
         await task.cancel()
 
-    logger.info("Pipeline v6.3 FINAL ready")
+    logger.info("Pipeline v6.4 LANGUAGE FIX ready")
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
 
