@@ -1,4 +1,4 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v6.4 Language Fix)"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v6.5 - Improved Responses)"""
 
 import os
 import json
@@ -23,7 +23,7 @@ from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v6.4-LANGUAGE-FIX starting...")
+logger.info("Mitesh Bot v6.5-IMPROVED starting...")
 
 # ──────────────────────────── Config ────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -48,7 +48,6 @@ def fetch_knowledge_sync(query_text):
         return "No knowledge available."
 
     try:
-        # Step 1: Generate embedding
         logger.info(f"RAG: Generating embedding for: '{query_text}'")
         embedding_response = oai_client.embeddings.create(
             model="text-embedding-3-small",
@@ -57,7 +56,6 @@ def fetch_knowledge_sync(query_text):
         query_embedding = embedding_response.data[0].embedding
         logger.info(f"RAG: Embedding generated, length={len(query_embedding)}")
 
-        # Step 2: Call match_knowledge with hardcoded profile_id
         logger.info(f"RAG: Calling match_knowledge with profile={HARDCODED_PROFILE_ID}")
         result = supabase.rpc("match_knowledge", {
             "query_embedding": query_embedding,
@@ -66,7 +64,6 @@ def fetch_knowledge_sync(query_text):
             "p_profile_id": HARDCODED_PROFILE_ID,
         }).execute()
 
-        # Step 3: Process results
         if result.data and len(result.data) > 0:
             chunks = []
             for c in result.data:
@@ -152,7 +149,7 @@ transport_params = {
 
 # ──────────────────────────── Bot ────────────────────────────
 async def run_bot(transport: BaseTransport, _runner_args):
-    logger.info("Starting pipeline v6.4 LANGUAGE FIX...")
+    logger.info("Starting pipeline v6.5 IMPROVED...")
 
     # Load profile
     profile = get_profile_info_sync(HARDCODED_PROFILE_ID)
@@ -174,22 +171,36 @@ LANGUAGE RULES (VERY IMPORTANT):
 - When in English mode, keep it natural and conversational English.
 - When in Hindi/Hinglish mode, use casual Hinglish naturally.
 
-RESPONSE RULES:
-- LIVE VOICE CALL. Keep responses to 2-3 sentences max.
-- Speak naturally like a real person on a phone call.
-- Be warm and encouraging. Use phrases like "Hey Champion", "Absolutely", "Great question".
+RESPONSE STYLE (VERY IMPORTANT):
+- This is a LIVE VOICE CALL. Respond in 4-6 sentences — not too short, not too long.
+- Be WARM, PERSONAL, and EMPATHETIC. Speak like a caring mentor on a phone call.
+- ALWAYS start with an empathetic acknowledgment: "That's a great question!", "I totally understand what you're going through", "I love that you're asking this".
+- Give PRACTICAL advice with a real-life EXAMPLE or SCENARIO the user can relate to.
+- End with an ENCOURAGING statement or a simple action step they can do TODAY.
+- Use phrases like "Hey Champion", "Absolutely", "Let me tell you something powerful", "Here's what I want you to do".
+- Share insights as if you're revealing a personal secret or coaching breakthrough.
+- Make the user feel HEARD, SUPPORTED, and MOTIVATED.
+
+KNOWLEDGE BASE RULES:
 - You MUST call search_knowledge_base function BEFORE answering ANY coaching question.
-- After getting knowledge, explain it simply in your own words.
-- If knowledge base returns results, USE that information in your answer.
+- After getting knowledge, explain it in your OWN words with warmth and personal touch.
+- If knowledge base returns results, USE that information but add empathy and examples.
+- Weave the knowledge naturally into your response — don't just read it out.
+- If asked about courses or programs, share details enthusiastically.
+
+VOICE CALL RULES:
 - NEVER read URLs, links, or use markdown formatting.
-- Talk like chatting with a friend.
-- Keep your tone warm, motivational, and coach-like."""
+- NEVER use bullet points or numbered lists — speak in flowing sentences.
+- Talk like chatting with a close friend who trusts you.
+- Use natural pauses and transitions: "Now here's the thing...", "And you know what?", "Let me share something with you...".
+- Keep your energy HIGH but GENUINE — not fake enthusiasm."""
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="whisper-1",
+        language="hi",
     )
-    logger.info("STT: whisper-1 (auto-detect language)")
+    logger.info("STT: whisper-1 (Hindi mode - works for English too)")
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -235,7 +246,7 @@ RESPONSE RULES:
         logger.info("Client connected")
         messages.append({
             "role": "system",
-            "content": "Greet the user warmly IN ENGLISH. Introduce yourself as Mitesh Khatri in 2 sentences max. Do NOT use Hindi."
+            "content": "Greet the user warmly IN ENGLISH. Say: 'Hey Champion! I'm Mitesh Khatri, your personal transformation coach. I'm so glad you're here today — ask me anything about life, success, relationships, or mindset, and let's make some magic happen!' Keep it natural and enthusiastic."
         })
         await task.queue_frames([LLMMessagesFrame(messages)])
 
@@ -244,7 +255,7 @@ RESPONSE RULES:
         logger.info("Client disconnected")
         await task.cancel()
 
-    logger.info("Pipeline v6.4 LANGUAGE FIX ready")
+    logger.info("Pipeline v6.5 IMPROVED ready")
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
 
