@@ -1,5 +1,6 @@
-pipecat-ai[daily,openai,cartesia,silero]
+pipecat-ai[daily,openai,cartesia,silero,webrtc]
 python-dotenv
 loguru
 supabase
 openai
+pipecat-ai-small-webrtc-prebuilt
