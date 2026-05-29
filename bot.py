@@ -60,12 +60,17 @@ except ImportError:
     LiveOptions = None
 
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_transport import FastAPIParams as DailyParams
-# Fallback for DailyParams if needed
+# DailyParams location varies across pipecat versions — try known paths in order.
 try:
-    from pipecat.transports.daily.transport import DailyTransport, DailyParams
+    from pipecat.transports.services.daily import DailyParams
 except ImportError:
-    pass
+    try:
+        from pipecat.transports.daily.transport import DailyParams
+    except ImportError:
+        try:
+            from pipecat.transports.network.fastapi_transport import FastAPIParams as DailyParams
+        except ImportError:
+            DailyParams = TransportParams
 
 import openai as openai_module
 from supabase import create_client
