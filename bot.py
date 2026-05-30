@@ -1,85 +1,39 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v7.0 - No Interruption + Anti-Hallucination)"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v8.0 - pipecat 1.x API)"""
 
-import os
-import json
 import asyncio
-from loguru import logger
+import json
+import os
+
 from dotenv import load_dotenv
+from loguru import logger
 
-# Robust Imports for Pipecat (Compatibility for v0.x and v1.x)
-try:
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-except ImportError:
-    try:
-        from pipecat.vad.silero import SileroVADAnalyzer
-    except ImportError:
-        from pipecat.analyzers.vad.silero import SileroVADAnalyzer
-
-try:
-    from pipecat.frames.frames import LLMContextFrame as LLMMessagesFrame
-except ImportError:
-    from pipecat.frames.frames import LLMMessagesFrame
-
+# ── pipecat 1.x imports ──────────────────────────────────────────────────────
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMContextFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-try:
-    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-except ImportError:
-    try:
-        from pipecat.services.openai import OpenAILLMContext
-    except ImportError:
-        try:
-            from pipecat.services.openai.llm import OpenAILLMContext
-        except ImportError:
-            try:
-                from pipecat.processors.aggregators.llm_response import LLMContextAggregator as OpenAILLMContext
-            except ImportError:
-                # Fallback for very new versions where it might be generic
-                from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextAggregator as OpenAILLMContext
-try:
-    from pipecat.services.cartesia.tts import CartesiaTTSService
-except ImportError:
-    from pipecat.services.cartesia import CartesiaTTSService
-
-try:
-    from pipecat.services.openai.llm import OpenAILLMService
-    from pipecat.services.openai.stt import OpenAISTTService
-except ImportError:
-    from pipecat.services.openai import OpenAILLMService, OpenAISTTService
-
-# Deepgram streaming STT (~300ms) — replaces batch Whisper for low latency.
-try:
-    from pipecat.services.deepgram.stt import DeepgramSTTService
-except ImportError:
-    from pipecat.services.deepgram import DeepgramSTTService
-
-try:
-    from deepgram import LiveOptions
-except ImportError:
-    LiveOptions = None
-
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-# DailyParams location varies across pipecat versions — try known paths in order.
-try:
-    from pipecat.transports.services.daily import DailyParams
-except ImportError:
-    try:
-        from pipecat.transports.daily.transport import DailyParams
-    except ImportError:
-        try:
-            from pipecat.transports.network.fastapi_transport import FastAPIParams as DailyParams
-        except ImportError:
-            DailyParams = TransportParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.workers.runner import WorkerRunner
 
 import openai as openai_module
 from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v7.0 starting (with Compatibility Fixes)...")
+logger.info("Mitesh Bot v8.0 starting (pipecat 1.x)...")
 
-# ———————————————————— Config ————————————————————
+# ── Config ────────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 HARDCODED_PROFILE_ID = "1cb7dee0-815f-4278-b93e-062bdf486389"
@@ -89,13 +43,13 @@ if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     logger.info("Supabase connected")
 else:
-    logger.warning("Supabase credentials missing")
+    logger.warning("Supabase credentials missing — RAG disabled")
 
 oai_client = openai_module.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-# ———————————————————— RAG ————————————————————
-def fetch_knowledge_sync(query_text):
+# ── RAG ───────────────────────────────────────────────────────────────────────
+def fetch_knowledge_sync(query_text: str) -> str:
     if not supabase or not query_text.strip():
         return "No knowledge available."
     try:
@@ -124,7 +78,7 @@ def fetch_knowledge_sync(query_text):
         return "Knowledge search failed."
 
 
-def get_profile_info_sync(profile_id):
+def get_profile_info_sync(profile_id: str) -> dict:
     if not supabase or not profile_id:
         return {}
     try:
@@ -139,13 +93,10 @@ def get_profile_info_sync(profile_id):
     return {}
 
 
-# ———————————————————— Function Handler ————————————————————
+# ── Tool handler (async, non-blocking) ────────────────────────────────────────
 async def handle_search_knowledge(function_name, tool_call_id, arguments, llm, context, result_callback):
     query = arguments.get("query", "")
     logger.info(f"FUNCTION CALL: search_knowledge_base('{query}')")
-    # Run the blocking embedding + Supabase call in a worker thread so the
-    # asyncio event loop (audio in/out) is NOT frozen while RAG runs.
-    # This was the main cause of the bot "freezing" / giving no response.
     try:
         knowledge = await asyncio.wait_for(
             asyncio.to_thread(fetch_knowledge_sync, query),
@@ -158,61 +109,50 @@ async def handle_search_knowledge(function_name, tool_call_id, arguments, llm, c
     await result_callback({"knowledge": knowledge})
 
 
-# ———————————————————— Tools ————————————————————
+# ── Tools ─────────────────────────────────────────────────────────────────────
 tools = [
     {
         "type": "function",
         "function": {
             "name": "search_knowledge_base",
-            "description": "Search the knowledge base for information about coaching, Law of Attraction, NLP, meditation, motivation, courses, affirmations, manifestation, relationships, wealth, health, career, mindset, energy, transformation, goals, success, self-improvement, happiness, gratitude, visualization, belief systems, limiting beliefs, abundance. You MUST call this function for EVERY user message that contains ANY question, topic, or request for advice. Call this even if the user message seems unclear - extract the best possible search query from it.",
+            "description": (
+                "Search the knowledge base for information about coaching, Law of Attraction, "
+                "NLP, meditation, motivation, courses, affirmations, manifestation, relationships, "
+                "wealth, health, career, mindset, energy, transformation, goals, success, "
+                "self-improvement, happiness, gratitude, visualization, belief systems, "
+                "limiting beliefs, abundance. Call this for EVERY user message — no exceptions."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query in English. Always translate Hindi/Hinglish to English before searching."
+                        "description": "Search query in English. Translate Hindi/Hinglish to English first.",
                     }
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     }
 ]
 
-# ———————————————————— Transport ————————————————————
+
+# ── Transport params (VAD is in LLMUserAggregatorParams, not transport) ───────
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(
-            params=SileroVADAnalyzer.InputParams(
-                threshold=0.6,
-                min_volume=0.5,
-                start_secs=0.2,
-                stop_secs=0.8,
-                confidence=0.7,
-            )
-        ),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(
-            params=SileroVADAnalyzer.InputParams(
-                threshold=0.6,
-                min_volume=0.5,
-                start_secs=0.2,
-                stop_secs=0.8,
-                confidence=0.7,
-            )
-        ),
     ),
 }
 
 
-# ———————————————————— Bot ————————————————————
+# ── Bot pipeline ──────────────────────────────────────────────────────────────
 async def run_bot(transport: BaseTransport, _runner_args):
-    logger.info("Starting pipeline v7.0...")
+    logger.info("Building pipeline v8.0 (pipecat 1.x)...")
 
     profile = get_profile_info_sync(HARDCODED_PROFILE_ID)
     profile_name = profile.get("name", "Mitesh Khatri")
@@ -226,55 +166,42 @@ Speaking Style: {profile_style}
 
 LANGUAGE RULES (VERY IMPORTANT):
 - Your DEFAULT language is ENGLISH. Always start and greet in English.
-- MATCH the user's language: If user speaks in English, reply in English. If user speaks in Hindi, reply in Hindi. If user speaks in Hinglish (mix), reply in Hinglish.
-- NEVER switch to Hindi/Hinglish unless the user speaks Hindi/Hinglish first.
+- MATCH the user's language: If user speaks English, reply English. If Hindi, reply Hindi. If Hinglish, reply Hinglish.
+- NEVER switch to Hindi/Hinglish unless the user speaks it first.
 
 RESPONSE STYLE (VERY IMPORTANT):
 - This is a LIVE VOICE CALL. Respond in 4-6 sentences — not too short, not too long.
 - Be WARM, PERSONAL, and EMPATHETIC. Speak like a caring mentor on a phone call.
-- ALWAYS start with an empathetic acknowledgment: "That's a great question!", "I totally understand what you're going through", "I love that you're asking this".
+- ALWAYS start with an empathetic acknowledgment: "That's a great question!", "I totally understand what you're going through".
 - Give PRACTICAL advice with a real-life EXAMPLE or SCENARIO the user can relate to.
 - End with an ENCOURAGING statement or a simple action step they can do TODAY.
 - Use phrases like "Hey Champion", "Absolutely", "Let me tell you something powerful", "Here's what I want you to do".
 - Make the user feel HEARD, SUPPORTED, and MOTIVATED.
 - ALWAYS complete your full response. Never stop mid-sentence.
 
-KNOWLEDGE BASE RULES (CRITICAL - FOLLOW STRICTLY):
-- You MUST call search_knowledge_base function for EVERY user message — no exceptions.
-- Even if the user's message seems unclear, garbled, or short — STILL call search_knowledge_base with your best interpretation of what they might be asking about.
-- If the transcription looks like broken Hindi/Hinglish, try to interpret the intent and search for that topic in English.
+KNOWLEDGE BASE RULES (CRITICAL):
+- You MUST call search_knowledge_base for EVERY user message — no exceptions.
+- Even if the message seems unclear or short — STILL call search_knowledge_base with your best interpretation.
+- If transcription looks like broken Hindi/Hinglish, interpret the intent and search in English.
 - NEVER answer a coaching question without first calling search_knowledge_base.
 - After getting knowledge, explain it in your OWN words with warmth and personal touch.
-- Weave the knowledge naturally into your response — don't just read it out.
-- If search returns no results, THEN you may answer from your general knowledge but still stay in character.
+- Weave the knowledge naturally — don't just read it out.
+- If search returns no results, answer from general knowledge but stay in character.
 
-IGNORE NOISE / HALLUCINATED TRANSCRIPTIONS:
-- If the user's message looks like random words, YouTube-style phrases like "link in the description", "subscribe", "like and share", or nonsensical text — these are TRANSCRIPTION ERRORS from background noise.
-- In such cases, politely ask the user to repeat their question clearly. Do NOT try to answer nonsensical transcriptions.
-- Example response: "Hey Champion, I didn't quite catch that. Could you please repeat your question? I want to make sure I give you the best answer!"
+IGNORE NOISE:
+- If the user's message looks like random words, YouTube phrases like "link in the description", "subscribe", or nonsensical text — these are TRANSCRIPTION ERRORS.
+- Politely ask to repeat: "Hey Champion, I didn't quite catch that. Could you please repeat your question?"
 
 VOICE CALL RULES:
-- NEVER read URLs, links, or use markdown formatting.
-- NEVER use bullet points or numbered lists — speak in flowing sentences.
+- NEVER read URLs, links, or use markdown.
+- NEVER use bullet points — speak in flowing sentences.
 - Talk like chatting with a close friend who trusts you.
-- Use natural transitions: "Now here's the thing...", "And you know what?", "Let me share something with you..."."""
+- Use natural transitions: "Now here's the thing...", "And you know what?", "Let me share something with you...\""""
 
-    # Deepgram streaming STT — nova-2 multilingual handles English/Hindi/Hinglish.
-    # interim_results + endpointing keep transcription finalizing fast.
-    if LiveOptions is not None:
-        stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            live_options=LiveOptions(
-                model="nova-2-general",
-                language="multi",
-                smart_format=True,
-                punctuate=True,
-                interim_results=True,
-                endpointing=300,
-            ),
-        )
-    else:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # ── Services ──────────────────────────────────────────────────────────────
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+    )
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -283,58 +210,70 @@ VOICE CALL RULES:
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id=os.getenv("CARTESIA_VOICE_ID"),
-        model_id="sonic-multilingual",
-    )
-
-    llm.register_function(
-        "search_knowledge_base",
-        handle_search_knowledge,
-    )
-
-    messages = [{"role": "system", "content": system_prompt}]
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
-
-    pipeline = Pipeline([
-        transport.input(),
-        stt,
-        context_aggregator.user(),
-        llm,
-        tts,
-        transport.output(),
-        context_aggregator.assistant(),
-    ])
-
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            allow_interruptions=False,
+        settings=CartesiaTTSService.Settings(
+            voice=os.getenv("CARTESIA_VOICE_ID"),
+            model="sonic-multilingual",
         ),
     )
 
+    llm.register_function("search_knowledge_base", handle_search_knowledge)
+
+    # ── Context ───────────────────────────────────────────────────────────────
+    messages = [{"role": "system", "content": system_prompt}]
+    context = LLMContext(messages=messages, tools=tools)
+
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
+    pipeline = Pipeline([
+        transport.input(),
+        stt,
+        user_aggregator,
+        llm,
+        tts,
+        transport.output(),
+        assistant_aggregator,
+    ])
+
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(allow_interruptions=False),
+    )
+
+    # ── Events ────────────────────────────────────────────────────────────────
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info("Client connected")
-        messages.append({
-            "role": "system",
-            "content": "Greet the user warmly IN ENGLISH. Say something like: 'Hey Champion! I am Mitesh Khatri, your personal transformation coach. I am so glad you are here today. Ask me anything about life, success, relationships, or mindset, and let us make some magic happen!' Keep it natural and enthusiastic."
+        logger.info("Client connected — triggering greeting")
+        context.add_message({
+            "role": "user",
+            "content": (
+                "Greet me warmly and introduce yourself as Mitesh Khatri, personal transformation coach. "
+                "Be enthusiastic, energetic, and make me feel welcome!"
+            ),
         })
-        # Use LLMMessagesFrame (which is now robustly imported)
-        await task.queue_frames([LLMMessagesFrame(messages)])
+        try:
+            await user_aggregator.push_frame(LLMContextFrame(context))
+        except Exception as e:
+            logger.warning(f"Greeting trigger failed: {e}")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
-        await task.cancel()
+        await worker.cancel()
 
-    logger.info("Pipeline ready")
-    runner = PipelineRunner(handle_sigint=False)
-    await runner.run(task)
+    logger.info("Pipeline ready — waiting for client...")
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
 
 
-async def bot(runner_args):
-    from pipecat.runner.utils import create_transport
+# ── Entry point ───────────────────────────────────────────────────────────────
+async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 
