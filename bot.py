@@ -64,12 +64,12 @@ def fetch_knowledge_sync(query_text: str) -> str:
         result = supabase.rpc("match_knowledge", {
             "query_embedding": query_embedding,
             "match_threshold": 0.35,
-            "match_count": 5,
+            "match_count": 3,          # 5→3: faster query, less data
             "p_profile_id": HARDCODED_PROFILE_ID,
         }).execute()
 
         if result.data and len(result.data) > 0:
-            chunks = [c.get("content", "")[:500] for c in result.data if c.get("content")]
+            chunks = [c.get("content", "")[:300] for c in result.data if c.get("content")]
             knowledge = "\n\n".join(chunks)
             logger.info(f"RAG: Found {len(result.data)} chunks")
             return knowledge
