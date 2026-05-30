@@ -259,8 +259,8 @@ VOICE CALL RULES:
     # ── Events ────────────────────────────────────────────────────────────────
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info("Client connected — waiting 2s for client audio to initialize...")
-        await asyncio.sleep(2.0)
+        logger.info("Client connected — waiting 1s for client audio to initialize...")
+        await asyncio.sleep(1.0)
         logger.info("Triggering greeting")
         context.add_message({
             "role": "user",
