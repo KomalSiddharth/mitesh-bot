@@ -4,4 +4,4 @@ secret_set = "mitesh-secrets"
 
 [scaling]
 min_agents = 2    # 2 agents always warm — zero cold start for first 2 users
-max_agents = 100  # scales up to 100 simultaneous voice calls
+max_agents = 10   # plan limit (contact Pipecat support to increase)
