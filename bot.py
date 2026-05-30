@@ -206,7 +206,7 @@ VOICE CALL RULES:
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini",
+        settings=OpenAILLMService.Settings(model="gpt-4o-mini"),
     )
 
     tts = CartesiaTTSService(
@@ -220,7 +220,15 @@ VOICE CALL RULES:
 
     # ── Context ───────────────────────────────────────────────────────────────
     messages = [{"role": "system", "content": system_prompt}]
-    function_schemas = [FunctionSchema.from_openai(tool) for tool in tools]
+    function_schemas = [
+        FunctionSchema(
+            name=tool["function"]["name"],
+            description=tool["function"]["description"],
+            properties=tool["function"]["parameters"]["properties"],
+            required=tool["function"]["parameters"].get("required", []),
+        )
+        for tool in tools
+    ]
     tools_schema = ToolsSchema(standard_tools=function_schemas)
     context = LLMContext(messages=messages, tools=tools_schema)
 
