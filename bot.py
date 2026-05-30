@@ -1,6 +1,7 @@
-"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG (v8.0 - pipecat 1.x API)"""
+"""Mitesh AI Coach - Pipecat Cloud Voice Bot with RAG + Redis Cache (v9.0 - pipecat 1.x API)"""
 
 import asyncio
+import hashlib
 import json
 import os
 
@@ -33,12 +34,13 @@ from supabase import create_client
 
 load_dotenv(override=True)
 
-logger.info("Mitesh Bot v8.0 starting (pipecat 1.x)...")
+logger.info("Mitesh Bot v9.0 starting (pipecat 1.x + Redis cache)...")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 HARDCODED_PROFILE_ID = "1cb7dee0-815f-4278-b93e-062bdf486389"
+CACHE_TTL_SECONDS = 3600  # cache results for 1 hour
 
 supabase = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -49,11 +51,45 @@ else:
 
 oai_client = openai_module.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ── Redis Cache (Upstash) ─────────────────────────────────────────────────────
+redis_client = None
+_UPSTASH_URL = os.getenv("UPSTASH_REDIS_URL", "")
+_UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN", "")
+
+if _UPSTASH_URL and _UPSTASH_TOKEN:
+    try:
+        from upstash_redis import Redis
+        redis_client = Redis(url=_UPSTASH_URL, token=_UPSTASH_TOKEN)
+        logger.info("Redis cache connected (Upstash)")
+    except Exception as e:
+        logger.warning(f"Redis init failed — cache disabled: {e}")
+else:
+    logger.warning("UPSTASH_REDIS_URL / UPSTASH_REDIS_TOKEN missing — cache disabled")
+
+
+def _cache_key(query: str) -> str:
+    """Stable cache key: rag:<md5 of lowercased query>"""
+    normalized = query.lower().strip()
+    return f"rag:{hashlib.md5(normalized.encode()).hexdigest()}"
+
 
 # ── RAG ───────────────────────────────────────────────────────────────────────
 def fetch_knowledge_sync(query_text: str) -> str:
     if not supabase or not query_text.strip():
         return "No knowledge available."
+
+    # ── 1. Check Redis cache first ────────────────────────────────────────────
+    key = _cache_key(query_text)
+    if redis_client:
+        try:
+            cached = redis_client.get(key)
+            if cached:
+                logger.info(f"CACHE HIT: '{query_text[:50]}' → {len(cached)} chars")
+                return cached
+        except Exception as e:
+            logger.warning(f"Redis GET error (will fetch from Supabase): {e}")
+
+    # ── 2. Cache miss — fetch from Supabase ───────────────────────────────────
     try:
         embedding_response = oai_client.embeddings.create(
             model="text-embedding-3-small",
@@ -64,14 +100,22 @@ def fetch_knowledge_sync(query_text: str) -> str:
         result = supabase.rpc("match_knowledge", {
             "query_embedding": query_embedding,
             "match_threshold": 0.35,
-            "match_count": 3,          # 5→3: faster query, less data
+            "match_count": 3,
             "p_profile_id": HARDCODED_PROFILE_ID,
         }).execute()
 
         if result.data and len(result.data) > 0:
             chunks = [c.get("content", "")[:300] for c in result.data if c.get("content")]
             knowledge = "\n\n".join(chunks)
-            logger.info(f"RAG: Found {len(result.data)} chunks")
+            logger.info(f"RAG: Found {len(result.data)} chunks — caching for {CACHE_TTL_SECONDS}s")
+
+            # ── 3. Store result in Redis ──────────────────────────────────────
+            if redis_client:
+                try:
+                    redis_client.set(key, knowledge, ex=CACHE_TTL_SECONDS)
+                except Exception as e:
+                    logger.warning(f"Redis SET error (result not cached): {e}")
+
             return knowledge
 
         return "No relevant knowledge found."
@@ -139,7 +183,7 @@ tools = [
 ]
 
 
-# ── Transport params (VAD is in LLMUserAggregatorParams, not transport) ───────
+# ── Transport params ──────────────────────────────────────────────────────────
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -154,7 +198,7 @@ transport_params = {
 
 # ── Bot pipeline ──────────────────────────────────────────────────────────────
 async def run_bot(transport: BaseTransport, _runner_args):
-    logger.info("Building pipeline v8.0 (pipecat 1.x)...")
+    logger.info("Building pipeline v9.0 (pipecat 1.x + Redis cache)...")
 
     profile = get_profile_info_sync(HARDCODED_PROFILE_ID)
     profile_name = profile.get("name", "Mitesh Khatri")
