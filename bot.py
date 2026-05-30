@@ -102,10 +102,10 @@ async def handle_search_knowledge(params: FunctionCallParams):
     try:
         knowledge = await asyncio.wait_for(
             asyncio.to_thread(fetch_knowledge_sync, query),
-            timeout=6.0,
+            timeout=12.0,
         )
     except asyncio.TimeoutError:
-        logger.warning("RAG timed out after 6s — answering without knowledge")
+        logger.warning("RAG timed out after 12s — answering without knowledge")
         knowledge = "Knowledge search timed out."
     logger.info(f"FUNCTION RESULT: {len(knowledge)} chars")
     await params.result_callback({"knowledge": knowledge})
