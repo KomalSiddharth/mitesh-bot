@@ -212,7 +212,6 @@ VOICE CALL RULES:
         api_key=os.getenv("CARTESIA_API_KEY"),
         settings=CartesiaTTSService.Settings(
             voice=os.getenv("CARTESIA_VOICE_ID"),
-            model="sonic-multilingual",
         ),
     )
 
