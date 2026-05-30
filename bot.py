@@ -102,10 +102,10 @@ async def handle_search_knowledge(params: FunctionCallParams):
     try:
         knowledge = await asyncio.wait_for(
             asyncio.to_thread(fetch_knowledge_sync, query),
-            timeout=12.0,
+            timeout=5.0,
         )
     except asyncio.TimeoutError:
-        logger.warning("RAG timed out after 12s — answering without knowledge")
+        logger.warning("RAG timed out after 5s — answering without knowledge")
         knowledge = "Knowledge search timed out."
     logger.info(f"FUNCTION RESULT: {len(knowledge)} chars")
     await params.result_callback({"knowledge": knowledge})
@@ -265,8 +265,8 @@ VOICE CALL RULES:
         context.add_message({
             "role": "user",
             "content": (
-                "Greet me warmly and introduce yourself as Mitesh Khatri, personal transformation coach. "
-                "Be enthusiastic, energetic, and make me feel welcome!"
+                "Greet the user in exactly 2 short sentences: introduce yourself as Mitesh Khatri and say you're here to help. "
+                "Be warm and energetic. Do NOT call search_knowledge_base for this greeting."
             ),
         })
         try:
