@@ -17,6 +17,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.adapters.schemas.tools_schema import FunctionSchema, ToolsSchema
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -219,7 +220,9 @@ VOICE CALL RULES:
 
     # ── Context ───────────────────────────────────────────────────────────────
     messages = [{"role": "system", "content": system_prompt}]
-    context = LLMContext(messages=messages, tools=tools)
+    function_schemas = [FunctionSchema.from_openai(tool) for tool in tools]
+    tools_schema = ToolsSchema(standard_tools=function_schemas)
+    context = LLMContext(messages=messages, tools=tools_schema)
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
