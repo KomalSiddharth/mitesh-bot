@@ -23,6 +23,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.workers.runner import WorkerRunner
@@ -95,8 +96,8 @@ def get_profile_info_sync(profile_id: str) -> dict:
 
 
 # ── Tool handler (async, non-blocking) ────────────────────────────────────────
-async def handle_search_knowledge(function_name, tool_call_id, arguments, llm, context, result_callback):
-    query = arguments.get("query", "")
+async def handle_search_knowledge(params: FunctionCallParams):
+    query = params.arguments.get("query", "")
     logger.info(f"FUNCTION CALL: search_knowledge_base('{query}')")
     try:
         knowledge = await asyncio.wait_for(
@@ -107,7 +108,7 @@ async def handle_search_knowledge(function_name, tool_call_id, arguments, llm, c
         logger.warning("RAG timed out after 6s — answering without knowledge")
         knowledge = "Knowledge search timed out."
     logger.info(f"FUNCTION RESULT: {len(knowledge)} chars")
-    await result_callback({"knowledge": knowledge})
+    await params.result_callback({"knowledge": knowledge})
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
